@@ -19,6 +19,7 @@ soup = BeautifulSoup(response.content, 'html.parser')
 titulos = []
 imagenes = []
 links = []
+parrafos = []  # Lista para almacenar los párrafos de cada noticia
 
 # Buscar todas las noticias
 for noticia in soup.find_all("article", class_="fusion-post-grid"):
@@ -26,22 +27,12 @@ for noticia in soup.find_all("article", class_="fusion-post-grid"):
     titulo_elem = noticia.find("h2", class_="blog-shortcode-post-title")
     if titulo_elem and titulo_elem.find("a"):
         titulo = titulo_elem.find("a").text.strip()
+        link = titulo_elem.find("a")['href']  # Obtener el enlace directamente del título
     else:
         titulo = "Sin título"
-    
-    """
-    Proceso para obtener la URL de la imagen:
-    1. Primero buscamos el contenedor de la imagen: div con clase 'fusion-flexslider'
-    2. Dentro de ese contenedor, buscamos la etiqueta <img>
-    3. La imagen puede estar en diferentes atributos debido al lazy loading:
-       - data-lazy-src: URL usada por el lazy loading de WordPress
-       - data-src: Alternativa común para lazy loading
-       - data-orig-src: URL original de la imagen
-       - srcset: Lista de URLs para diferentes tamaños (tomamos la primera)
-       - src: URL directa de la imagen
-    4. Probamos cada atributo en orden hasta encontrar uno que tenga la URL
-    5. Si ningún atributo tiene la URL, devolvemos "Sin imagen"
-    """
+        link = "Sin link"
+
+    # Obtener imagen
     img_container = noticia.find("div", class_="fusion-flexslider")
     if img_container:
         img_elem = img_container.find("img")
@@ -51,56 +42,77 @@ for noticia in soup.find_all("article", class_="fusion-post-grid"):
                 img_elem.get("data-lazy-src") or
                 img_elem.get("data-src") or
                 img_elem.get("data-orig-src") or
-                img_elem.get("srcset", "").split(" ")[0] or
-                img_elem.get("src") or
-                "Sin imagen"
+                img_elem.get("src", "Sin imagen")
             )
         else:
             imagen = "Sin imagen"
     else:
         imagen = "Sin imagen"
+
+    # Obtener el contenido completo de la noticia
+    contenido_parrafos = []
+    if link != "Sin link":
+        try:
+            # Visitar la página individual de la noticia
+            response_noticia = requests.get(link, headers=headers)
+            soup_noticia = BeautifulSoup(response_noticia.content, 'html.parser')
+            
+            # Buscar el contenido principal de la noticia
+            contenido_elem = soup_noticia.find("div", class_="post-content")
+            if contenido_elem:
+                # Obtener todos los párrafos del contenido
+                for p in contenido_elem.find_all("p"):
+                    texto = p.text.strip()
+                    # Excluir metadatos y párrafos vacíos
+                    if texto and not any(texto.startswith(x) for x in ["Web Master", "By", "|"]):
+                        contenido_parrafos.append(texto)
+        except Exception as e:
+            print(f"Error al obtener contenido de {link}: {str(e)}")
+            contenido_parrafos = ["Error al obtener contenido"]
     
-    # Obtener link de leer más
-    link_elem = noticia.find("a", class_="fusion-read-more")
-    if link_elem:
-        link = link_elem.get("href")
-    else:
-        link = "Sin link"
-    
+    # Agregar datos a las listas
     titulos.append(titulo)
     imagenes.append(imagen)
     links.append(link)
-    
+    parrafos.append(contenido_parrafos)
+
+    # Imprimir la información encontrada
     print("\nNoticia encontrada:")
     print("Título:", titulo)
     print("Imagen URL:", imagen)
-    print("Leer más URL:", link)
+    print("URL de la noticia:", link)
+    print("Contenido:")
+    for i, parrafo in enumerate(contenido_parrafos, 1):
+        print(f"  Párrafo {i}: {parrafo}")
     print("---")
 
-# Crear un DataFrame
+# Crear DataFrame con los datos
 df = pd.DataFrame({
-    "Título": titulos,
-    "Imagen": imagenes,
-    "Leer más": links
+    'Título': titulos,
+    'Imagen': imagenes,
+    'Link': links,
+    'Párrafos': parrafos
 })
 
-# Guardar el DataFrame en un archivo Excel
-try:
-    nombre_archivo = "noticias_umb.xlsx"
-    # Si el archivo existe, intentar eliminarlo primero
-    if os.path.exists(nombre_archivo):
-        os.remove(nombre_archivo)
-    df.to_excel(nombre_archivo, index=False)
-    print(f"\nSe han guardado {len(titulos)} noticias en el archivo '{nombre_archivo}'")
-    print("\nPrimeras 3 noticias:")
-    print(df.head(3))
-except PermissionError:
-    print(f"\nError: No se pudo guardar el archivo '{nombre_archivo}'. Asegúrate de que no esté abierto en Excel.")
-    print("\nMostrando los datos en consola:")
-    print(df)
-except Exception as e:
-    print(f"\nError al guardar el archivo: {str(e)}")
-    print("\nMostrando los datos en consola:")
-    print(df)
+# Guardar en Excel
+df.to_excel('noticias_umb.xlsx', index=False)
+print(f"\nSe han guardado {len(df)} noticias en el archivo 'noticias_umb.xlsx'")
 
-exit()
+# Guardar en archivo de texto
+with open('noticias_umb.txt', 'w', encoding='utf-8') as f:
+    for i, (titulo, imagen, link, contenido) in enumerate(zip(titulos, imagenes, links, parrafos), 1):
+        f.write(f"NOTICIA {i}\n")
+        f.write("="*50 + "\n")
+        f.write(f"TÍTULO: {titulo}\n")
+        f.write(f"IMAGEN: {imagen}\n")
+        f.write(f"LINK: {link}\n")
+        f.write("\nCONTENIDO:\n")
+        for j, parrafo in enumerate(contenido, 1):
+            f.write(f"Párrafo {j}: {parrafo}\n")
+        f.write("\n" + "="*50 + "\n\n")
+
+print(f"Se ha guardado el contenido en 'noticias_umb.txt'")
+
+# Mostrar las primeras 3 noticias
+print("\nPrimeras 3 noticias:")
+print(df.head(3))
